@@ -1,0 +1,45 @@
+#!/usr/bin/env ruby
+# encoding: UTF-8
+
+require 'trollop'
+
+opts = Trollop.options do
+  banner "Usage: #{__FILE__} [options]"
+
+  opt :user, 'internal user name', type: String, default: 'root'
+  opt :ip, 'internal ip', type: String, required: true
+  opt :tunnel, 'ssh tunnel host', type: String, default: ENV['TUNNEL']
+end
+
+user = opts[:user]
+ip = opts[:ip]
+tunnel = opts[:tunnel]
+
+# add all private keys to ssh agent
+puts 'adding all private keys to ssh agent ...'
+Dir[File.expand_path('~/.ssh/*')]
+  .reject { |f| f =~ /\/known_hosts$|\/config$|\.pub$/ }
+  .each { |f| system "ssh-add #{f}" }
+
+# create ssh tunnel from private ip to localhost with a random port
+tunnel_port = (1024..65535).to_a.sample
+tunnel_pid = fork do
+  cmd = "ssh -L #{tunnel_port}:#{ip}:22 #{tunnel} -N"
+  puts "executing #{cmd} ..."
+  exec cmd
+end
+
+# kill ssh tunnel proccess before exiting
+at_exit do
+  puts 'killing ssh tunnel ...'
+  Process.kill 'INT', tunnel_pid
+end
+
+# wait for ssh tunnel to be created
+puts 'sleeping ...'
+sleep 0.5
+
+# connect to localhost
+cmd = "ssh -p #{tunnel_port} #{user}@localhost"
+puts "executing #{cmd} ..."
+system cmd
